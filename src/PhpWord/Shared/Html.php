@@ -109,7 +109,7 @@ class Html
 
         // Node mapping table
         $nodes = array(
-                              // $method        $node   $element    $styles     $data   $argument1      $argument2
+            // $method        $node   $element    $styles     $data   $argument1      $argument2
             'p'         => array('Paragraph',   $node,  $element,   $styles,    null,   null,           null),
             'h1'        => array('Heading',     null,   $element,   $styles,    null,   'Heading1',     null),
             'h2'        => array('Heading',     null,   $element,   $styles,    null,   'Heading2',     null),
@@ -117,14 +117,18 @@ class Html
             'h4'        => array('Heading',     null,   $element,   $styles,    null,   'Heading4',     null),
             'h5'        => array('Heading',     null,   $element,   $styles,    null,   'Heading5',     null),
             'h6'        => array('Heading',     null,   $element,   $styles,    null,   'Heading6',     null),
-            '#text'     => array('Text',        $node,  $element,   $styles,    null,   null,           null),
+            '#text'     => array('Text',        $node,  $element,   $styles,    null,    null,          null),
+            'span'      => array('Paragraph',   $node,  $element,   $styles,    null,    null,          null), //to catch inline span style changes
             'strong'    => array('Property',    null,   null,       $styles,    null,   'bold',         true),
             'em'        => array('Property',    null,   null,       $styles,    null,   'italic',       true),
             'sup'       => array('Property',    null,   null,       $styles,    null,   'superScript',  true),
             'sub'       => array('Property',    null,   null,       $styles,    null,   'subScript',    true),
             'table'     => array('Table',       $node,  $element,   $styles,    null,   'addTable',     true),
+            'thead'     => array('Table',       $node,  $element,   $styles,    null,   'skipThead',    true), //added to catch thead in html.
+            'tbody'     => array('Table',       $node,  $element,   $styles,    null,   'skipTbody',    true), //added to catch tbody in html.
             'tr'        => array('Table',       $node,  $element,   $styles,    null,   'addRow',       true),
             'td'        => array('Table',       $node,  $element,   $styles,    null,   'addCell',      true),
+            'th'        => array('Table',       $node,  $element,   $styles,    null,   'addCell',      true),
             'ul'        => array('List',        null,   null,       $styles,    $data,  3,              null),
             'ol'        => array('List',        null,   null,       $styles,    $data,  7,              null),
             'li'        => array('ListItem',    $node,  $element,   $styles,    $data,  null,           null),
@@ -173,10 +177,22 @@ class Html
      */
     private static function parseChildNodes($node, $element, $styles, $data)
     {
-        if ('li' != $node->nodeName) {
+        if ($node->nodeName != 'li') {
             $cNodes = $node->childNodes;
             if (count($cNodes) > 0) {
                 foreach ($cNodes as $cNode) {
+                    // Added to get tables to work
+                    $htmlContainers = array(
+                        'tbody',
+                        'thead',
+                        'tr',
+                        'th',
+                        'td',
+                    );
+                    if (in_array( $cNode->nodeName, $htmlContainers ) ) {
+                        self::parseNode($cNode, $element, $styles, $data);
+                    }
+                    // All other containers as defined in AbstractContainer
                     if ($element instanceof AbstractContainer) {
                         self::parseNode($cNode, $element, $styles, $data);
                     }
@@ -235,7 +251,7 @@ class Html
         // Commented as source of bug #257. `method_exists` doesn't seems to work properly in this case.
         // @todo Find better error checking for this one
         // if (method_exists($element, 'addText')) {
-            $element->addText($node->nodeValue, $styles['font'], $styles['paragraph']);
+        $element->addText($node->nodeValue, $styles['font'], $styles['paragraph']);
         // }
 
         return null;
@@ -269,20 +285,35 @@ class Html
      */
     private static function parseTable($node, $element, &$styles, $argument1)
     {
-        $styles['paragraph'] = self::parseInlineStyle($node, $styles['paragraph']);
-
-        $newElement = $element->$argument1();
+        switch ($argument1) {
+            case 'addTable':
+                $styles['paragraph'] = self::parseInlineStyle($node, $styles['paragraph']);
+                $newElement = $element->addTable('table', array('width' => 90));
+                break;
+            case 'skipTbody':
+                $newElement = $element;
+                break;
+            case 'skipThead':
+                $newElement = $element;
+                break;
+            case 'addRow':
+                $newElement = $element->addRow();
+                break;
+            case 'addCell':
+                $newElement = $element->addCell(1750);
+                break;
+        }
 
         // $attributes = $node->attributes;
         // if ($attributes->getNamedItem('width') !== null) {
-            // $newElement->setWidth($attributes->getNamedItem('width')->value);
+        // $newElement->setWidth($attributes->getNamedItem('width')->value);
         // }
 
         // if ($attributes->getNamedItem('height') !== null) {
-            // $newElement->setHeight($attributes->getNamedItem('height')->value);
+        // $newElement->setHeight($attributes->getNamedItem('height')->value);
         // }
         // if ($attributes->getNamedItem('width') !== null) {
-            // $newElement=$element->addCell($width=$attributes->getNamedItem('width')->value);
+        // $newElement=$element->addCell($width=$attributes->getNamedItem('width')->value);
         // }
 
         return $newElement;
