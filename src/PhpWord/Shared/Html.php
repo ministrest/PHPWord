@@ -18,6 +18,10 @@
 namespace PhpOffice\PhpWord\Shared;
 
 use PhpOffice\PhpWord\Element\AbstractContainer;
+use PhpOffice\PhpWord\Element\Table;
+use PhpOffice\PhpWord\Element\Row;
+use PhpOffice\PhpWord\Element\Cell;
+use PhpOffice\PhpWord\Element\TextRun;
 
 /**
  * Common Html functions
@@ -26,6 +30,27 @@ use PhpOffice\PhpWord\Element\AbstractContainer;
  */
 class Html
 {
+    //public static $phpWord=null;
+
+    /**
+    *  Hold styles from parent elements,
+    *  allowing child elements inherit attributes.
+    *  So if you whant your table row have bold font
+    *  you can do:
+    *     <tr style="font-weight: bold; ">
+    *  instead of
+    *     <tr>
+    *       <td>
+    *           <p style="font-weight: bold;">
+    *       ...
+    *
+    *  Before DOM element children are processed,
+    *  the parent DOM element styles are added to the stack.
+    *  The styles for each child element is composed by
+    *  its styles plus the parent styles.
+    */
+    public static $stylesStack=null;
+
     /**
      * Add HTML parts.
      *
@@ -61,6 +86,9 @@ class Html
         $dom->loadXML($html);
         $node = $dom->getElementsByTagName('body');
 
+        //self::$phpWord = $element->getPhpWord();
+        self::$stylesStack = array();
+
         self::parseNode($node->item(0), $element);
     }
 
@@ -74,16 +102,15 @@ class Html
     protected static function parseInlineStyle($node, $styles = array())
     {
         if (XML_ELEMENT_NODE == $node->nodeType) {
-            $attributes = $node->attributes; // get all the attributes(eg: id, class)
-
-            foreach ($attributes as $attribute) {
-                switch ($attribute->name) {
-                    case 'style':
-                        $styles = self::parseStyle($attribute, $styles);
-                        break;
-                }
-            }
+            $stylesStr = $node->getAttribute('style');
+            $styles = self::parseStyle($node, $stylesStr, $styles);
         }
+        else
+        {
+            // Just to balance the stack.
+            // (make number of pushs = number of pops)
+            self::pushStyles(array());
+        } 
 
         return $styles;
     }
@@ -100,7 +127,7 @@ class Html
     protected static function parseNode($node, $element, $styles = array(), $data = array())
     {
         // Populate styles array
-        $styleTypes = array('font', 'paragraph', 'list');
+        $styleTypes = array('font', 'paragraph', 'list', 'table', 'row', 'cell'); //@change
         foreach ($styleTypes as $styleType) {
             if (!isset($styles[$styleType])) {
                 $styles[$styleType] = array();
@@ -109,26 +136,28 @@ class Html
 
         // Node mapping table
         $nodes = array(
-            // $method        $node   $element    $styles     $data   $argument1      $argument2
+                              // $method        $node   $element    $styles     $data   $argument1      $argument2
             'p'         => array('Paragraph',   $node,  $element,   $styles,    null,   null,           null),
+            'span'      => array('Paragraph',   $node,  $element,   $styles,    null,   null,           null),
             'h1'        => array('Heading',     null,   $element,   $styles,    null,   'Heading1',     null),
             'h2'        => array('Heading',     null,   $element,   $styles,    null,   'Heading2',     null),
             'h3'        => array('Heading',     null,   $element,   $styles,    null,   'Heading3',     null),
             'h4'        => array('Heading',     null,   $element,   $styles,    null,   'Heading4',     null),
             'h5'        => array('Heading',     null,   $element,   $styles,    null,   'Heading5',     null),
             'h6'        => array('Heading',     null,   $element,   $styles,    null,   'Heading6',     null),
-            '#text'     => array('Text',        $node,  $element,   $styles,    null,    null,          null),
-            'span'      => array('Paragraph',   $node,  $element,   $styles,    null,    null,          null), //to catch inline span style changes
+            '#text'     => array('Text',        $node,  $element,   $styles,    null,   null,           null),
             'strong'    => array('Property',    null,   null,       $styles,    null,   'bold',         true),
             'em'        => array('Property',    null,   null,       $styles,    null,   'italic',       true),
             'sup'       => array('Property',    null,   null,       $styles,    null,   'superScript',  true),
             'sub'       => array('Property',    null,   null,       $styles,    null,   'subScript',    true),
-            'table'     => array('Table',       $node,  $element,   $styles,    null,   'addTable',     true),
-            'thead'     => array('Table',       $node,  $element,   $styles,    null,   'skipThead',    true), //added to catch thead in html.
-            'tbody'     => array('Table',       $node,  $element,   $styles,    null,   'skipTbody',    true), //added to catch tbody in html.
-            'tr'        => array('Table',       $node,  $element,   $styles,    null,   'addRow',       true),
-            'td'        => array('Table',       $node,  $element,   $styles,    null,   'addCell',      true),
-            'th'        => array('Table',       $node,  $element,   $styles,    null,   'addCell',      true),
+            // @change
+            //'table'     => array('Table',       $node,  $element,   $styles,    null,   'addTable',     true),
+            //'tr'        => array('Table',       $node,  $element,   $styles,    null,   'addRow',       true),
+            //'td'        => array('Table',       $node,  $element,   $styles,    null,   'addCell',      true),
+            'table'     => array('Table' ,       $node,  $element,   $styles,    null,   null,     true),
+            'tr'        => array('Row'   ,       $node,  $element,   $styles,    null,   null,       true),
+            'td'        => array('Cell'  ,       $node,  $element,   $styles,    null,   null,      true),
+            'th'        => array('Cell'  ,       $node,  $element,   $styles,    null,   null,      true),
             'ul'        => array('List',        null,   null,       $styles,    $data,  3,              null),
             'ol'        => array('List',        null,   null,       $styles,    $data,  7,              null),
             'li'        => array('ListItem',    $node,  $element,   $styles,    $data,  null,           null),
@@ -158,12 +187,22 @@ class Html
                 }
             }
         }
+        else
+        {
+            // Just to balance the stack.
+            // Number of pushs = number of pops.
+            self::pushStyles(array());
+        }
 
         if ($newElement === null) {
             $newElement = $element;
         }
 
         self::parseChildNodes($node, $newElement, $styles, $data);
+
+        // After the parent element be processed, 
+        // its styles are removed from stack.
+        self::popStyles();
     }
 
     /**
@@ -177,23 +216,11 @@ class Html
      */
     private static function parseChildNodes($node, $element, $styles, $data)
     {
-        if ($node->nodeName != 'li') {
+        if ('li' != $node->nodeName) {
             $cNodes = $node->childNodes;
             if (count($cNodes) > 0) {
                 foreach ($cNodes as $cNode) {
-                    // Added to get tables to work
-                    $htmlContainers = array(
-                        'tbody',
-                        'thead',
-                        'tr',
-                        'th',
-                        'td',
-                    );
-                    if (in_array( $cNode->nodeName, $htmlContainers ) ) {
-                        self::parseNode($cNode, $element, $styles, $data);
-                    }
-                    // All other containers as defined in AbstractContainer
-                    if ($element instanceof AbstractContainer) {
+                    if (($element instanceof AbstractContainer) or ($element instanceof Table) or ($element instanceof Row)) { // @change
                         self::parseNode($cNode, $element, $styles, $data);
                     }
                 }
@@ -211,8 +238,9 @@ class Html
      */
     private static function parseParagraph($node, $element, &$styles)
     {
-        $styles['paragraph'] = self::parseInlineStyle($node, $styles['paragraph']);
-        $newElement = $element->addTextRun($styles['paragraph']);
+        $elementStyles = self::parseInlineStyle($node, $styles['paragraph']);
+
+        $newElement = $element->addTextRun($elementStyles);
 
         return $newElement;
     }
@@ -230,8 +258,9 @@ class Html
      */
     private static function parseHeading($element, &$styles, $argument1)
     {
-        $styles['paragraph'] = $argument1;
-        $newElement = $element->addTextRun($styles['paragraph']);
+        $elementStyles = $argument1;
+
+        $newElement = $element->addTextRun($elementStyles);
 
         return $newElement;
     }
@@ -246,13 +275,16 @@ class Html
      */
     private static function parseText($node, $element, &$styles)
     {
-        $styles['font'] = self::parseInlineStyle($node, $styles['font']);
+        $elementStyles = self::parseInlineStyle($node, $styles['font']);
+
+        $textStyles = self::getInheritedTextStyles();
+        $paragraphStyles = self::getInheritedParagraphStyles();
 
         // Commented as source of bug #257. `method_exists` doesn't seems to work properly in this case.
         // @todo Find better error checking for this one
-        // if (method_exists($element, 'addText')) {
-        $element->addText($node->nodeValue, $styles['font'], $styles['paragraph']);
-        // }
+        if ($element instanceof TextRun || $element instanceof Cell) {
+            $element->addText($node->nodeValue, $textStyles, $paragraphStyles);
+        }
 
         return null;
     }
@@ -285,37 +317,44 @@ class Html
      */
     private static function parseTable($node, $element, &$styles, $argument1)
     {
-        switch ($argument1) {
-            case 'addTable':
-                $styles['paragraph'] = self::parseInlineStyle($node, $styles['paragraph']);
-                $newElement = $element->addTable('table', array('width' => 90));
-                break;
-            case 'skipTbody':
-                $newElement = $element;
-                break;
-            case 'skipThead':
-                $newElement = $element;
-                break;
-            case 'addRow':
-                $newElement = $element->addRow();
-                break;
-            case 'addCell':
-                $newElement = $element->addCell(1750);
-                break;
-        }
+        $elementStyles = self::parseInlineStyle($node, $styles['table']);
+
+        $newElement = $element->addTable($elementStyles);
 
         // $attributes = $node->attributes;
         // if ($attributes->getNamedItem('width') !== null) {
-        // $newElement->setWidth($attributes->getNamedItem('width')->value);
+            // $newElement->setWidth($attributes->getNamedItem('width')->value);
         // }
 
         // if ($attributes->getNamedItem('height') !== null) {
-        // $newElement->setHeight($attributes->getNamedItem('height')->value);
+            // $newElement->setHeight($attributes->getNamedItem('height')->value);
         // }
         // if ($attributes->getNamedItem('width') !== null) {
-        // $newElement=$element->addCell($width=$attributes->getNamedItem('width')->value);
+            // $newElement=$element->addCell($width=$attributes->getNamedItem('width')->value);
         // }
 
+        return $newElement;
+    }
+
+    private static function parseRow($node, $element, &$styles, $argument1)
+    {
+        $elementStyles = self::parseInlineStyle($node, $styles['row']);
+
+        $newElement = $element->addRow(null, $elementStyles);
+
+        return $newElement;
+    }
+
+
+    private static function parseCell($node, $element, &$styles, $argument1)
+    {        
+        $elementStyles = self::parseInlineStyle($node, $styles['cell']);
+
+        $colspan = $node->getAttribute('colspan');        
+        if (!empty($colspan))
+            $elementStyles['gridSpan'] = $colspan-0;        
+
+        $newElement = $element->addCell(null, $elementStyles);
         return $newElement;
     }
 
@@ -374,35 +413,242 @@ class Html
      * @param array $styles
      * @return array
      */
-    private static function parseStyle($attribute, $styles)
+    private static function parseStyle($node, $stylesStr, $styles)
     {
-        $properties = explode(';', trim($attribute->value, " \t\n\r\0\x0B;"));
-        foreach ($properties as $property) {
-            list($cKey, $cValue) = explode(':', $property, 2);
-            $cValue = trim($cValue);
-            switch (trim($cKey)) {
-                case 'text-decoration':
-                    switch ($cValue) {
-                        case 'underline':
-                            $styles['underline'] = 'single';
-                            break;
-                        case 'line-through':
-                            $styles['strikethrough'] = true;
-                            break;
-                    }
-                    break;
-                case 'text-align':
-                    $styles['alignment'] = $cValue; // todo: any mapping?
-                    break;
-                case 'color':
-                    $styles['color'] = trim($cValue, "#");
-                    break;
-                case 'background-color':
-                    $styles['bgColor'] = trim($cValue, "#");
-                    break;
+        // Parses element styles.
+        $newStyles = array();
+
+        if (!empty($stylesStr))
+        {
+            $properties = explode(';', trim($stylesStr, " \t\n\r\0\x0B;"));
+            foreach ($properties as $property) {
+                list($cKey, $cValue) = explode(':', $property, 2);
+                $cValue = trim($cValue);
+                switch (trim($cKey)) {
+                    case 'text-decoration':
+                        switch ($cValue) {
+                            case 'underline':
+                                $newStyles['underline'] = 'single';
+                                break;
+                            case 'line-through':
+                                $newStyles['strikethrough'] = true;
+                                break;
+                        }
+                        break;                
+                    case 'text-align':
+                        $newStyles['alignment'] = $cValue; // todo: any mapping?
+                        break;
+                    case 'color':
+                        $newStyles['color'] = trim($cValue, "#");
+                        break;
+                    case 'background-color':
+                        $newStyles['bgColor'] = trim($cValue, "#");
+                        break;
+
+                    // @change
+                    case 'colspan':
+                        $newStyles['gridSpan'] = $cValue-0;
+                        break;
+                    case 'font-weight':
+                        if ($cValue=='bold')
+                            $newStyles['bold'] = true;
+                        break;                    
+                    case 'width':
+                        $newStyles = self::parseWidth($newStyles, $cValue);
+                        break;
+                    case 'border-width':
+                        $newStyles = self::parseBorderStyle($newStyles, $cValue);
+                        break;
+                    case 'border-color':
+                        $newStyles = self::parseBorderColor($newStyles, $cValue);
+                        break;
+                    case 'border':
+                        $newStyles = self::parseBorder($newStyles, $cValue);
+                        break;                    
+                }
             }
         }
 
+        // Add styles to stack.
+        self::pushStyles($newStyles);
+
+        // Inherit parent styles (including itself).
+        $inheritedStyles = self::getInheritedStyles($node->nodeName);
+
+        // Override default styles with the inherited ones.
+        $styles = array_merge($styles, $inheritedStyles);       
+
+        /* DEBUG
+        if ($node->nodeName=='th')
+        {
+            echo '<pre>';
+            print_r(self::$stylesStack);
+            print_r($styles);
+            //print_r($elementStyles);
+            echo '</pre>';
+        }
+        */
+
         return $styles;
+    }
+
+    /**
+    *  Parses the "width" style attribute, adding to styles
+    *  array the corresponding PHPWORD attributes.
+    */
+    public static function parseWidth($styles, $cValue)
+    {
+        if (preg_match('/([0-9]+)px/', $cValue, $matches))
+        {
+            $styles['width'] = $matches[1];
+            $styles['unit'] = 'dxa';
+        }
+        else if (preg_match('/([0-9]+)%/', $cValue, $matches))
+        {
+            $styles['width'] = $matches[1]*50;
+            $styles['unit'] = 'pct';
+        }
+        else if (preg_match('/([0-9]+)/', $cValue, $matches))
+        {
+            $styles['width'] = $matches[1];
+            $styles['unit'] = 'auto';
+        }
+
+        $styles['alignment'] = \PhpOffice\PhpWord\SimpleType\JcTable::START;
+
+        return $styles;
+    }
+
+    /**
+    *  Parses the "border-width" style attribute, adding to styles
+    *  array the corresponding PHPWORD attributes.
+    */
+    public static function parseBorderWidth($styles, $cValue)
+    {
+        // border-width: 2px;
+        if (preg_match('/([0-9]+)px/', $cValue, $matches))
+            $styles['borderSize'] = $matches[1];
+
+        return $styles;
+    }
+
+    /**
+    *  Parses the "border-color" style attribute, adding to styles
+    *  array the corresponding PHPWORD attributes.
+    */
+    public static function parseBorderColor($styles, $cValue)
+    {
+        // border-color: #FFAACC;
+        $styles['borderColor'] = $cValue;
+
+        return $styles;
+    }    
+
+    /**
+    *  Parses the "border" style attribute, adding to styles
+    *  array the corresponding PHPWORD attributes.
+    */
+    public static function parseBorder($styles, $cValue)
+    {
+        if (preg_match('/([0-9]+)px\s+(\#[a-fA-F0-9]+)\s+solid+/', $cValue, $matches))
+        {
+            $styles['borderSize'] = $matches[1];
+            $styles['borderColor'] = $matches[2];
+        }
+
+        return $styles;
+    }
+
+    /**
+    *  Return the inherited styles for text elements,
+    *  considering current stack state.
+    */
+    public static function getInheritedTextStyles()
+    {
+        return self::getInheritedStyles('#text');
+    }
+
+    /**
+    *  Return the inherited styles for paragraph elements,
+    *  considering current stack state.
+    */
+    public static function getInheritedParagraphStyles()
+    {
+        return self::getInheritedStyles('p');
+    }
+
+    /**
+    *  Return the inherited styles for a given nodeType,
+    *  considering current stack state.
+    */
+    public static function  getInheritedStyles($nodeType)
+    {
+        $textStyles = array('color', 'bold', 'italic');
+        $paragraphStyles = array('color', 'bold', 'italic', 'alignment');
+
+        // List of phpword styles relevant for each element types.
+        $stylesMapping = array(
+            'p'         => $paragraphStyles,
+            'h1'        => $textStyles,
+            'h2'        => $textStyles,
+            'h3'        => $textStyles,
+            'h4'        => $textStyles,
+            'h5'        => $textStyles,
+            'h6'        => $textStyles,
+            '#text'     => $textStyles,
+            'strong'    => $textStyles,
+            'em'        => $textStyles,
+            'sup'       => $textStyles,
+            'sub'       => $textStyles,
+            'table'     => array('width', 'borderSize', 'borderColor', 'unit'),
+            'tr'        => array('bgColor', 'alignment'),
+            'td'        => array('bgColor', 'alignment'),
+            'th'        => array('bgColor', 'alignment'),
+            'ul'        => $textStyles,
+            'ol'        => $textStyles,
+            'li'        => $textStyles,
+        );
+
+        $result = array();
+
+        if (isset($stylesMapping[$nodeType]))
+        {
+            $nodeStyles = $stylesMapping[$nodeType];
+
+            // Loop trough styles stack applying styles in
+            // the right order.
+            foreach (self::$stylesStack as $styles)
+            {
+                // Loop trough all styles applying only the relevants for
+                // that node type.
+                foreach ($styles as $name => $value)
+                {
+                    if (in_array($name, $nodeStyles))
+                    {
+                        $result[$name] = $value;
+                    }
+                }
+            }
+        }
+
+        return $result;
+    }
+
+
+    /**
+    *  Add the parent styles to stack, allowing
+    *  children elements inherit from.
+    */
+    public static function pushStyles($styles)
+    {
+        self::$stylesStack[] = $styles;
+    }
+
+    /**
+    *  Remove parent styles at end of recursion.
+    */
+    public static function popStyles()
+    {
+        array_pop(self::$stylesStack);
     }
 }
